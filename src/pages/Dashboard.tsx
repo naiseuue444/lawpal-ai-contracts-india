@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,17 +14,33 @@ import {
   User,
   BarChart,
   Settings,
-  Globe
+  Globe,
+  LogOut
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+
+interface Contract {
+  id: string;
+  filename: string;
+  upload_date: string;
+  analysis_status: string;
+  risk_score: string | null;
+}
 
 const Dashboard = () => {
   const [language, setLanguage] = useState('en');
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+  const { toast } = useToast();
 
   const content = {
     en: {
-      welcome: "Welcome back, Advocate Sharma!",
+      welcome: "Welcome back!",
       uploadNew: "Upload New Contract",
       recentContracts: "Recent Contract Analysis",
       quickStats: "Quick Stats",
@@ -37,7 +53,7 @@ const Dashboard = () => {
       }
     },
     hi: {
-      welcome: "वापस स्वागत है, एडवोकेट शर्मा!",
+      welcome: "वापस स्वागत है!",
       uploadNew: "नया अनुबंध अपलोड करें",
       recentContracts: "हाल के अनुबंध विश्लेषण",
       quickStats: "त्वरित आंकड़े",
@@ -53,45 +69,87 @@ const Dashboard = () => {
 
   const t = content[language];
 
-  // Mock data
-  const stats = [
-    { label: t.statsLabels.total, value: "24", icon: FileText, color: "text-blue-600" },
-    { label: t.statsLabels.pending, value: "3", icon: Clock, color: "text-yellow-600" },
-    { label: t.statsLabels.completed, value: "21", icon: CheckCircle, color: "text-green-600" },
-    { label: t.statsLabels.risks, value: "5", icon: AlertTriangle, color: "text-red-600" }
-  ];
+  useEffect(() => {
+    if (user) {
+      fetchContracts();
+    }
+  }, [user]);
 
-  const recentContracts = [
-    {
-      id: 1,
-      name: "Employment Agreement - Tech Corp",
-      uploadDate: "2024-06-15",
-      status: "completed",
-      riskLevel: "medium"
+  const fetchContracts = async () => {
+    try {
+      // Get user profile first
+      const { data: userProfile } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_id', user?.id)
+        .single();
+
+      if (userProfile) {
+        const { data: contractsData } = await supabase
+          .from('contracts')
+          .select('*')
+          .eq('user_id', userProfile.id)
+          .order('upload_date', { ascending: false })
+          .limit(10);
+
+        setContracts(contractsData || []);
+      }
+    } catch (error) {
+      console.error('Error fetching contracts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      navigate('/');
+      toast({
+        title: "Signed out successfully",
+        description: "Come back soon!",
+      });
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
+
+  // Calculate stats
+  const stats = [
+    { 
+      label: t.statsLabels.total, 
+      value: contracts.length.toString(), 
+      icon: FileText, 
+      color: "text-blue-600" 
     },
-    {
-      id: 2,
-      name: "Vendor Service Agreement", 
-      uploadDate: "2024-06-14",
-      status: "pending",
-      riskLevel: null
+    { 
+      label: t.statsLabels.pending, 
+      value: contracts.filter(c => c.analysis_status === 'pending' || c.analysis_status === 'analyzing').length.toString(), 
+      icon: Clock, 
+      color: "text-yellow-600" 
     },
-    {
-      id: 3,
-      name: "Partnership Agreement",
-      uploadDate: "2024-06-13", 
-      status: "completed",
-      riskLevel: "high"
+    { 
+      label: t.statsLabels.completed, 
+      value: contracts.filter(c => c.analysis_status === 'completed').length.toString(), 
+      icon: CheckCircle, 
+      color: "text-green-600" 
+    },
+    { 
+      label: t.statsLabels.risks, 
+      value: contracts.filter(c => c.risk_score === 'high').length.toString(), 
+      icon: AlertTriangle, 
+      color: "text-red-600" 
     }
   ];
 
   const getStatusBadge = (status: string) => {
     const badges = {
       completed: <Badge className="bg-green-100 text-green-700">Completed</Badge>,
-      pending: <Badge className="bg-yellow-100 text-yellow-700">Analyzing...</Badge>,
+      pending: <Badge className="bg-yellow-100 text-yellow-700">Pending</Badge>,
+      analyzing: <Badge className="bg-blue-100 text-blue-700">Analyzing</Badge>,
       failed: <Badge className="bg-red-100 text-red-700">Failed</Badge>
     };
-    return badges[status as keyof typeof badges];
+    return badges[status as keyof typeof badges] || <Badge>{status}</Badge>;
   };
 
   const getRiskBadge = (risk: string | null) => {
@@ -103,6 +161,17 @@ const Dashboard = () => {
     };
     return badges[risk as keyof typeof badges];
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
@@ -124,13 +193,9 @@ const Dashboard = () => {
               <Globe className="h-4 w-4" />
               <span>{language === 'en' ? 'हिं' : 'EN'}</span>
             </Button>
-            <Button variant="outline" onClick={() => navigate('/settings')}>
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </Button>
-            <Button variant="outline">
-              <User className="h-4 w-4 mr-2" />
-              Profile
+            <Button variant="outline" onClick={handleSignOut}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
             </Button>
           </div>
         </div>
@@ -200,55 +265,36 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {recentContracts.map((contract) => (
-                    <div key={contract.id} className="flex items-center justify-between p-4 bg-white/50 rounded-lg border">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900">{contract.name}</h4>
-                        <p className="text-sm text-gray-600">Uploaded: {contract.uploadDate}</p>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        {getStatusBadge(contract.status)}
-                        {getRiskBadge(contract.riskLevel)}
-                        {contract.status === 'completed' && (
-                          <Button size="sm" variant="outline">
-                            <Download className="h-4 w-4 mr-1" />
-                            Report
-                          </Button>
-                        )}
-                      </div>
+                  {contracts.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No contracts uploaded yet. Upload your first contract to get started!
                     </div>
-                  ))}
+                  ) : (
+                    contracts.map((contract) => (
+                      <div key={contract.id} className="flex items-center justify-between p-4 bg-white/50 rounded-lg border">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-gray-900">{contract.filename}</h4>
+                          <p className="text-sm text-gray-600">
+                            Uploaded: {new Date(contract.upload_date).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          {getStatusBadge(contract.analysis_status)}
+                          {getRiskBadge(contract.risk_score)}
+                          {contract.analysis_status === 'completed' && (
+                            <Button size="sm" variant="outline">
+                              <Download className="h-4 w-4 mr-1" />
+                              Report
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
-        </div>
-
-        {/* Additional Actions */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="bg-white/60 backdrop-blur-sm hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <BarChart className="h-8 w-8 text-blue-600 mx-auto mb-3" />
-              <h3 className="font-semibold text-gray-900 mb-2">Analytics</h3>
-              <p className="text-sm text-gray-600">View detailed contract insights</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/60 backdrop-blur-sm hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <Shield className="h-8 w-8 text-green-600 mx-auto mb-3" />
-              <h3 className="font-semibold text-gray-900 mb-2">Risk Assessment</h3>
-              <p className="text-sm text-gray-600">Review risk patterns</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/60 backdrop-blur-sm hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <User className="h-8 w-8 text-purple-600 mx-auto mb-3" />
-              <h3 className="font-semibold text-gray-900 mb-2">LawPal Buddy</h3>
-              <p className="text-sm text-gray-600">Ask questions about contracts</p>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

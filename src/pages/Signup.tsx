@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Shield, Mail, Lock, User, Globe, GraduationCap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 
 const Signup = () => {
   const [language, setLanguage] = useState('en');
@@ -21,6 +22,14 @@ const Signup = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signUp, user } = useAuth();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const content = {
     en: {
@@ -63,15 +72,35 @@ const Signup = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate signup for now
-    setTimeout(() => {
-      setIsLoading(false);
-      toast({
-        title: "Account Created!",
-        description: "Welcome to LawPal AI! Your account has been created successfully.",
+    try {
+      const { error } = await signUp(formData.email, formData.password, {
+        name: formData.name,
+        role: formData.role,
+        organization: formData.organization
       });
-      navigate('/dashboard');
-    }, 1000);
+
+      if (error) {
+        toast({
+          title: "Signup Failed",
+          description: error.message,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Account Created!",
+          description: "Welcome to LawPal AI! Please check your email to verify your account.",
+        });
+        navigate('/dashboard');
+      }
+    } catch (error: any) {
+      toast({
+        title: "Signup Failed",
+        description: "An unexpected error occurred",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const updateFormData = (field: string, value: string) => {
@@ -182,7 +211,7 @@ const Signup = () => {
                 />
               </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full" disabled={isLoading || !formData.role}>
                 {isLoading ? "Creating Account..." : t.signupBtn}
               </Button>
             </form>

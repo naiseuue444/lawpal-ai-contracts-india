@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Shield, Mail, Lock, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 
 const Login = () => {
   const [language, setLanguage] = useState('en');
@@ -15,6 +16,14 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signIn, user } = useAuth();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const content = {
     en: {
@@ -43,15 +52,31 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate login for now
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const { error } = await signIn(email, password);
+      
+      if (error) {
+        toast({
+          title: "Login Failed",
+          description: error.message,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Login Successful",
+          description: "Welcome back to LawPal AI!",
+        });
+        navigate('/dashboard');
+      }
+    } catch (error: any) {
       toast({
-        title: "Login Successful",
-        description: "Welcome back to LawPal AI!",
+        title: "Login Failed",
+        description: "An unexpected error occurred",
+        variant: "destructive"
       });
-      navigate('/dashboard');
-    }, 1000);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
