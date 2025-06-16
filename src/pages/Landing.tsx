@@ -6,11 +6,33 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle, Upload, Shield, BookOpen, Users, BarChart, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+interface PricingPlan {
+  name: string;
+  price: string;
+  contracts: string;
+}
+
+interface ContentType {
+  tagline: string;
+  subtitle: string;
+  uploadBtn: string;
+  loginBtn: string;
+  tryFreeBtn: string;
+  features: string[];
+  forWho: string;
+  roles: string[];
+  pricing: {
+    student: PricingPlan;
+    solo: PricingPlan;
+    firm: PricingPlan;
+  };
+}
+
 const Landing = () => {
   const [language, setLanguage] = useState('en');
   const navigate = useNavigate();
 
-  const content = {
+  const content: Record<string, ContentType> = {
     en: {
       tagline: "India's Smartest Legal Contract Reviewer",
       subtitle: "Save time. Reduce risk. Get smart legal suggestions instantly.",
