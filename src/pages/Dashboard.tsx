@@ -125,11 +125,14 @@ const Dashboard = () => {
         .eq('contract_id', contractId)
         .single();
 
-      if (reportError) {
-        throw new Error('Report not found');
+      if (reportError && reportError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+        console.error('Error fetching report:', reportError);
+        throw new Error('Failed to fetch report: ' + reportError.message);
       }
 
       if (!report?.pdf_url) {
+        console.log('No existing report found, generating new report...');
+        
         // If no report exists, generate one
         const { data: analysisData, error: analysisError } = await supabase
           .from('contracts')
@@ -141,8 +144,15 @@ const Dashboard = () => {
           .single();
 
         if (analysisError) {
-          throw new Error('Failed to fetch contract analysis');
+          console.error('Error fetching contract analysis:', analysisError);
+          throw new Error('Failed to fetch contract analysis: ' + analysisError.message);
         }
+
+        if (!analysisData) {
+          throw new Error('Contract analysis data not found');
+        }
+
+        console.log('Contract analysis data fetched, generating PDF...');
 
         // Generate PDF report
         const { data: pdfData, error: pdfError } = await supabase.functions.invoke('generate-pdf-report', {
@@ -153,11 +163,22 @@ const Dashboard = () => {
         });
 
         if (pdfError) {
-          throw new Error('Failed to generate PDF report');
+          console.error('Error generating PDF:', pdfError);
+          throw new Error('Failed to generate PDF report: ' + pdfError.message);
         }
+
+        if (!pdfData?.pdfUrl) {
+          throw new Error('PDF URL not returned from generation function');
+        }
+
+        console.log('PDF generated successfully, downloading...');
 
         // Download the generated PDF
         const response = await fetch(pdfData.pdfUrl);
+        if (!response.ok) {
+          throw new Error('Failed to download PDF: ' + response.statusText);
+        }
+        
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -168,8 +189,14 @@ const Dashboard = () => {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
+        console.log('Existing report found, downloading...');
+        
         // Download existing report
         const response = await fetch(report.pdf_url);
+        if (!response.ok) {
+          throw new Error('Failed to download existing PDF: ' + response.statusText);
+        }
+        
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
