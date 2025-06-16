@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,6 +33,7 @@ const Dashboard = () => {
   const [language, setLanguage] = useState('en');
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { toast } = useToast();
@@ -111,6 +111,89 @@ const Dashboard = () => {
       });
     } catch (error) {
       console.error('Sign out error:', error);
+    }
+  };
+
+  const handleDownloadReport = async (contractId: string) => {
+    try {
+      setDownloading(contractId);
+      
+      // Get the report URL from the reports table
+      const { data: report, error: reportError } = await supabase
+        .from('reports')
+        .select('pdf_url')
+        .eq('contract_id', contractId)
+        .single();
+
+      if (reportError) {
+        throw new Error('Report not found');
+      }
+
+      if (!report?.pdf_url) {
+        // If no report exists, generate one
+        const { data: analysisData, error: analysisError } = await supabase
+          .from('contracts')
+          .select(`
+            *,
+            clauses (*)
+          `)
+          .eq('id', contractId)
+          .single();
+
+        if (analysisError) {
+          throw new Error('Failed to fetch contract analysis');
+        }
+
+        // Generate PDF report
+        const { data: pdfData, error: pdfError } = await supabase.functions.invoke('generate-pdf-report', {
+          body: JSON.stringify({ 
+            contractId,
+            analysis: analysisData
+          })
+        });
+
+        if (pdfError) {
+          throw new Error('Failed to generate PDF report');
+        }
+
+        // Download the generated PDF
+        const response = await fetch(pdfData.pdfUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `contract-analysis-${contractId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        // Download existing report
+        const response = await fetch(report.pdf_url);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `contract-analysis-${contractId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
+      toast({
+        title: "Report downloaded successfully",
+        description: "Your contract analysis report has been downloaded.",
+      });
+    } catch (error: any) {
+      console.error('Download error:', error);
+      toast({
+        title: "Download failed",
+        description: error.message || "Failed to download report",
+        variant: "destructive"
+      });
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -282,9 +365,14 @@ const Dashboard = () => {
                           {getStatusBadge(contract.analysis_status)}
                           {getRiskBadge(contract.risk_score)}
                           {contract.analysis_status === 'completed' && (
-                            <Button size="sm" variant="outline">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleDownloadReport(contract.id)}
+                              disabled={downloading === contract.id}
+                            >
                               <Download className="h-4 w-4 mr-1" />
-                              Report
+                              {downloading === contract.id ? "Downloading..." : "Report"}
                             </Button>
                           )}
                         </div>

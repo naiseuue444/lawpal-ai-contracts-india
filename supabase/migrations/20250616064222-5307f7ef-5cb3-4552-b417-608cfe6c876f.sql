@@ -1,4 +1,3 @@
-
 -- Create users table for authentication and user management
 CREATE TABLE public.users (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -61,6 +60,19 @@ CREATE TABLE public.chat_queries (
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
+-- Create storage bucket for contract reports
+INSERT INTO storage.buckets (id, name, public) VALUES ('contract-reports', 'contract-reports', true);
+
+-- Create storage policy to allow authenticated users to upload reports
+CREATE POLICY "Allow authenticated users to upload reports"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'contract-reports');
+
+-- Create storage policy to allow public access to reports
+CREATE POLICY "Allow public access to reports"
+ON storage.objects FOR SELECT TO public
+USING (bucket_id = 'contract-reports');
+
 -- Enable Row Level Security
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contracts ENABLE ROW LEVEL SECURITY;
@@ -89,29 +101,12 @@ CREATE POLICY "Users can update their own contracts" ON public.contracts
   FOR UPDATE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Create RLS policies for clauses table
-CREATE POLICY "Users can view clauses of their contracts" ON public.clauses
-  FOR SELECT USING (contract_id IN (
-    SELECT c.id FROM public.contracts c 
-    JOIN public.users u ON c.user_id = u.id 
-    WHERE u.auth_id = auth.uid()
-  ));
-
-CREATE POLICY "System can insert clauses" ON public.clauses
-  FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "System can update clauses" ON public.clauses
-  FOR UPDATE USING (true);
+CREATE POLICY "Users can view their own contract clauses" ON public.clauses
+  FOR SELECT USING (contract_id IN (SELECT id FROM public.contracts WHERE user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())));
 
 -- Create RLS policies for reports table
-CREATE POLICY "Users can view their contract reports" ON public.reports
-  FOR SELECT USING (contract_id IN (
-    SELECT c.id FROM public.contracts c 
-    JOIN public.users u ON c.user_id = u.id 
-    WHERE u.auth_id = auth.uid()
-  ));
-
-CREATE POLICY "System can insert reports" ON public.reports
-  FOR INSERT WITH CHECK (true);
+CREATE POLICY "Users can view their own reports" ON public.reports
+  FOR SELECT USING (contract_id IN (SELECT id FROM public.contracts WHERE user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())));
 
 -- Create RLS policies for chat queries table
 CREATE POLICY "Users can view their own chat queries" ON public.chat_queries
