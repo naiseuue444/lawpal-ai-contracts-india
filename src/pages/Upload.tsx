@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Shield, Upload as UploadIcon, FileText, Globe, ArrowLeft } from 'lucide-react';
+import { Shield, Upload as UploadIcon, FileText, Globe, ArrowLeft, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -72,16 +72,21 @@ const Upload = () => {
 
     setIsUploading(true);
     try {
+      console.log('Starting upload process...');
+      
       // First, get the user's profile to get the user_id
-      const { data: userProfile } = await supabase
+      const { data: userProfile, error: profileError } = await supabase
         .from('users')
         .select('id')
         .eq('auth_id', user.id)
         .single();
 
-      if (!userProfile) {
-        throw new Error('User profile not found');
+      if (profileError || !userProfile) {
+        console.error('User profile error:', profileError);
+        throw new Error('User profile not found. Please try logging out and back in.');
       }
+
+      console.log('User profile found:', userProfile.id);
 
       // Create contract record
       const { data: contract, error: contractError } = await supabase
@@ -95,28 +100,42 @@ const Upload = () => {
         .select()
         .single();
 
-      if (contractError) throw contractError;
+      if (contractError) {
+        console.error('Contract creation error:', contractError);
+        throw contractError;
+      }
 
-      // Start contract analysis (this would call an edge function)
-      const { error: analysisError } = await supabase.functions.invoke('analyze-contract', {
-        body: { 
+      console.log('Contract created:', contract.id);
+
+      // Convert file to base64
+      const base64File = await fileToBase64(file);
+      console.log('File converted to base64, length:', base64File.length);
+
+      // Start contract analysis
+      console.log('Calling analyze-contract function...');
+      const { data: analysisResult, error: analysisError } = await supabase.functions.invoke('analyze-contract', {
+        body: JSON.stringify({ 
           contractId: contract.id,
-          file: await fileToBase64(file)
-        }
+          file: base64File
+        })
       });
 
       if (analysisError) {
-        console.warn('Analysis failed:', analysisError);
+        console.error('Analysis error:', analysisError);
         // Update contract status to failed
         await supabase
           .from('contracts')
           .update({ analysis_status: 'failed' })
           .eq('id', contract.id);
+        
+        throw new Error('Analysis failed: ' + analysisError.message);
       }
+
+      console.log('Analysis result:', analysisResult);
 
       toast({
         title: "Contract uploaded successfully!",
-        description: "Analysis is in progress. You'll be notified when it's complete.",
+        description: "Analysis is complete. Check your dashboard for results.",
       });
 
       navigate('/dashboard');
@@ -210,13 +229,23 @@ const Upload = () => {
                 </div>
               )}
 
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-medium mb-1">AI-Powered Analysis</p>
+                    <p>Your contract will be analyzed using advanced AI to identify key clauses, risks, and provide legal insights in both English and Hindi.</p>
+                  </div>
+                </div>
+              </div>
+
               <Button 
                 onClick={handleUpload}
                 disabled={!file || isUploading}
                 className="w-full bg-blue-600 hover:bg-blue-700"
                 size="lg"
               >
-                {isUploading ? "Uploading..." : t.uploadBtn}
+                {isUploading ? "Analyzing..." : t.uploadBtn}
               </Button>
             </CardContent>
           </Card>
