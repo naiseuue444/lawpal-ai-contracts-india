@@ -118,47 +118,27 @@ const Dashboard = () => {
     try {
       setDownloading(contractId);
       
-      // Get the report URL from the reports table
-      const { data: report, error: reportError } = await supabase
+      // First check if report already exists
+      const { data: existingReport, error: reportError } = await supabase
         .from('reports')
         .select('pdf_url')
         .eq('contract_id', contractId)
-        .single();
+        .maybeSingle();
 
-      if (reportError && reportError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-        console.error('Error fetching report:', reportError);
-        throw new Error('Failed to fetch report: ' + reportError.message);
+      if (reportError) {
+        console.error('Error checking for existing report:', reportError);
+        throw new Error('Failed to check for existing report: ' + reportError.message);
       }
 
-      if (!report?.pdf_url) {
+      let pdfUrl = existingReport?.pdf_url;
+
+      // If no report exists, generate one
+      if (!pdfUrl) {
         console.log('No existing report found, generating new report...');
         
-        // If no report exists, generate one
-        const { data: analysisData, error: analysisError } = await supabase
-          .from('contracts')
-          .select(`
-            *,
-            clauses (*)
-          `)
-          .eq('id', contractId)
-          .single();
-
-        if (analysisError) {
-          console.error('Error fetching contract analysis:', analysisError);
-          throw new Error('Failed to fetch contract analysis: ' + analysisError.message);
-        }
-
-        if (!analysisData) {
-          throw new Error('Contract analysis data not found');
-        }
-
-        console.log('Contract analysis data fetched, generating PDF...');
-
-        // Generate PDF report
         const { data: pdfData, error: pdfError } = await supabase.functions.invoke('generate-pdf-report', {
           body: JSON.stringify({ 
-            contractId,
-            analysis: analysisData
+            contractId
           })
         });
 
@@ -167,46 +147,29 @@ const Dashboard = () => {
           throw new Error('Failed to generate PDF report: ' + pdfError.message);
         }
 
-        if (!pdfData?.pdfUrl) {
-          throw new Error('PDF URL not returned from generation function');
+        if (!pdfData?.success || !pdfData?.pdfUrl) {
+          throw new Error('PDF generation failed - no URL returned');
         }
 
-        console.log('PDF generated successfully, downloading...');
-
-        // Download the generated PDF
-        const response = await fetch(pdfData.pdfUrl);
-        if (!response.ok) {
-          throw new Error('Failed to download PDF: ' + response.statusText);
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `contract-analysis-${contractId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        console.log('Existing report found, downloading...');
-        
-        // Download existing report
-        const response = await fetch(report.pdf_url);
-        if (!response.ok) {
-          throw new Error('Failed to download existing PDF: ' + response.statusText);
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `contract-analysis-${contractId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        pdfUrl = pdfData.pdfUrl;
+        console.log('PDF generated successfully');
       }
+
+      // Download the PDF
+      const response = await fetch(pdfUrl);
+      if (!response.ok) {
+        throw new Error('Failed to download PDF: ' + response.statusText);
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `contract-analysis-${contractId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
       toast({
         title: "Report downloaded successfully",
@@ -221,6 +184,49 @@ const Dashboard = () => {
       });
     } finally {
       setDownloading(null);
+    }
+  };
+
+  const handleViewReport = async (contractId: string) => {
+    try {
+      // Check if report already exists
+      const { data: existingReport, error: reportError } = await supabase
+        .from('reports')
+        .select('pdf_url')
+        .eq('contract_id', contractId)
+        .maybeSingle();
+
+      if (reportError) {
+        console.error('Error checking for existing report:', reportError);
+        throw new Error('Failed to check for existing report');
+      }
+
+      let pdfUrl = existingReport?.pdf_url;
+
+      // If no report exists, generate one
+      if (!pdfUrl) {
+        const { data: pdfData, error: pdfError } = await supabase.functions.invoke('generate-pdf-report', {
+          body: JSON.stringify({ 
+            contractId
+          })
+        });
+
+        if (pdfError || !pdfData?.success) {
+          throw new Error('Failed to generate PDF report');
+        }
+
+        pdfUrl = pdfData.pdfUrl;
+      }
+
+      // Open PDF in new tab
+      window.open(pdfUrl, '_blank');
+    } catch (error: any) {
+      console.error('View error:', error);
+      toast({
+        title: "View failed",
+        description: error.message || "Failed to view report",
+        variant: "destructive"
+      });
     }
   };
 
@@ -392,15 +398,25 @@ const Dashboard = () => {
                           {getStatusBadge(contract.analysis_status)}
                           {getRiskBadge(contract.risk_score)}
                           {contract.analysis_status === 'completed' && (
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleDownloadReport(contract.id)}
-                              disabled={downloading === contract.id}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              {downloading === contract.id ? "Downloading..." : "Report"}
-                            </Button>
+                            <div className="flex space-x-2">
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => handleViewReport(contract.id)}
+                              >
+                                <FileText className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => handleDownloadReport(contract.id)}
+                                disabled={downloading === contract.id}
+                              >
+                                <Download className="h-4 w-4 mr-1" />
+                                {downloading === contract.id ? "Downloading..." : "Download"}
+                              </Button>
+                            </div>
                           )}
                         </div>
                       </div>

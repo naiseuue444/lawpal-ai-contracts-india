@@ -1,3 +1,4 @@
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
@@ -22,7 +23,7 @@ Deno.serve(async (req) => {
     console.log('Starting PDF report generation...');
     
     const requestBody = await req.text();
-    console.log('Request body received:', requestBody.substring(0, 100) + '...');
+    console.log('Request body received');
     
     let parsedBody;
     try {
@@ -38,14 +39,47 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { contractId, analysis } = parsedBody;
+    const { contractId } = parsedBody;
 
-    if (!contractId || !analysis) {
-      console.error('Missing required data:', { contractId, hasAnalysis: !!analysis });
+    if (!contractId) {
+      console.error('Missing contractId');
       return new Response(
-        JSON.stringify({ error: 'Missing contractId or analysis data' }),
+        JSON.stringify({ error: 'Missing contractId' }),
         { 
           status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    console.log('Fetching contract data for ID:', contractId);
+    
+    // Fetch contract with clauses
+    const { data: contract, error: contractError } = await supabase
+      .from('contracts')
+      .select(`
+        *,
+        clauses (*)
+      `)
+      .eq('id', contractId)
+      .single();
+
+    if (contractError) {
+      console.error('Error fetching contract:', contractError);
+      return new Response(
+        JSON.stringify({ error: 'Contract not found: ' + contractError.message }),
+        { 
+          status: 404, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    if (!contract) {
+      return new Response(
+        JSON.stringify({ error: 'Contract not found' }),
+        { 
+          status: 404, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
@@ -55,7 +89,7 @@ Deno.serve(async (req) => {
     
     // Create a new PDF document
     const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
+    let page = pdfDoc.addPage([595.28, 841.89]); // A4 size
     const { width, height } = page.getSize();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -80,7 +114,7 @@ Deno.serve(async (req) => {
     });
 
     y -= 30;
-    page.drawText(`Contract Type: ${analysis.contract_type || 'Not specified'}`, {
+    page.drawText(`Filename: ${contract.filename || 'Not specified'}`, {
       x: 50,
       y,
       size: 12,
@@ -89,7 +123,7 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Risk Score: ${analysis.risk_score || 'Not specified'}`, {
+    page.drawText(`Contract Type: ${contract.contract_type || 'Not specified'}`, {
       x: 50,
       y,
       size: 12,
@@ -98,7 +132,7 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Jurisdiction: ${analysis.jurisdiction || 'Not specified'}`, {
+    page.drawText(`Risk Score: ${contract.risk_score || 'Not specified'}`, {
       x: 50,
       y,
       size: 12,
@@ -107,7 +141,16 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Arbitration Present: ${analysis.arbitration_present ? 'Yes' : 'No'}`, {
+    page.drawText(`Jurisdiction: ${contract.jurisdiction || 'Not specified'}`, {
+      x: 50,
+      y,
+      size: 12,
+      font: font,
+      color: rgb(0, 0, 0),
+    });
+
+    y -= 20;
+    page.drawText(`Arbitration Present: ${contract.arbitration_present ? 'Yes' : 'No'}`, {
       x: 50,
       y,
       size: 12,
@@ -125,24 +168,29 @@ Deno.serve(async (req) => {
       color: rgb(0, 0, 0),
     });
 
-    if (!analysis.clauses || !Array.isArray(analysis.clauses)) {
-      console.error('No clauses found in analysis data');
+    if (!contract.clauses || !Array.isArray(contract.clauses) || contract.clauses.length === 0) {
+      console.log('No clauses found in contract data');
+      y -= 30;
       page.drawText('No clause analysis available', {
         x: 50,
-        y: y - 30,
+        y,
         size: 12,
         font: font,
         color: rgb(0.5, 0.5, 0.5),
       });
     } else {
-      for (const clause of analysis.clauses) {
-        y -= 30;
-        if (y < 50) {
-          // Add new page if we're running out of space
-          const newPage = pdfDoc.addPage([595.28, 841.89]);
-          y = newPage.getSize().height - 50;
+      console.log(`Found ${contract.clauses.length} clauses`);
+      
+      for (let i = 0; i < contract.clauses.length; i++) {
+        const clause = contract.clauses[i];
+        
+        // Check if we need a new page
+        if (y < 150) {
+          page = pdfDoc.addPage([595.28, 841.89]);
+          y = page.getSize().height - 50;
         }
 
+        y -= 30;
         page.drawText(`Clause ${clause.clause_number}: ${clause.title}`, {
           x: 50,
           y,
@@ -160,34 +208,35 @@ Deno.serve(async (req) => {
           color: rgb(0, 0, 0),
         });
 
-        y -= 20;
-        page.drawText(`Summary (EN): ${clause.summary_en}`, {
-          x: 50,
-          y,
-          size: 12,
-          font: font,
-          color: rgb(0, 0, 0),
-        });
+        if (clause.summary_en) {
+          y -= 20;
+          const summaryText = clause.summary_en.length > 80 
+            ? clause.summary_en.substring(0, 80) + '...'
+            : clause.summary_en;
+          page.drawText(`Summary: ${summaryText}`, {
+            x: 50,
+            y,
+            size: 12,
+            font: font,
+            color: rgb(0, 0, 0),
+          });
+        }
 
-        y -= 20;
-        page.drawText(`Summary (HI): ${clause.summary_hi}`, {
-          x: 50,
-          y,
-          size: 12,
-          font: font,
-          color: rgb(0, 0, 0),
-        });
+        if (clause.suggestion) {
+          y -= 20;
+          const suggestionText = clause.suggestion.length > 80 
+            ? clause.suggestion.substring(0, 80) + '...'
+            : clause.suggestion;
+          page.drawText(`Suggestion: ${suggestionText}`, {
+            x: 50,
+            y,
+            size: 12,
+            font: font,
+            color: rgb(0, 0, 0),
+          });
+        }
 
-        y -= 20;
-        page.drawText(`Suggestion: ${clause.suggestion}`, {
-          x: 50,
-          y,
-          size: 12,
-          font: font,
-          color: rgb(0, 0, 0),
-        });
-
-        y -= 20;
+        y -= 10; // Extra space between clauses
       }
     }
 
@@ -209,7 +258,13 @@ Deno.serve(async (req) => {
 
     if (uploadError) {
       console.error('Storage upload error:', uploadError);
-      throw new Error('Failed to upload PDF report: ' + uploadError.message);
+      return new Response(
+        JSON.stringify({ error: 'Failed to upload PDF report: ' + uploadError.message }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
     }
 
     console.log('Getting public URL...');
@@ -221,17 +276,25 @@ Deno.serve(async (req) => {
 
     console.log('Saving report reference in database...');
     
-    // Save report reference in database
+    // Save or update report reference in database
     const { error: dbError } = await supabase
       .from('reports')
-      .insert({
+      .upsert({
         contract_id: contractId,
         pdf_url: publicUrl
+      }, {
+        onConflict: 'contract_id'
       });
 
     if (dbError) {
       console.error('Database error:', dbError);
-      throw new Error('Failed to save report reference: ' + dbError.message);
+      return new Response(
+        JSON.stringify({ error: 'Failed to save report reference: ' + dbError.message }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
     }
 
     console.log('PDF report generation completed successfully');
@@ -250,7 +313,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('PDF generation error:', error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: 'PDF generation failed: ' + error.message }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
