@@ -276,15 +276,35 @@ Deno.serve(async (req) => {
 
     console.log('Saving report reference in database...');
     
-    // Save or update report reference in database
-    const { error: dbError } = await supabase
+    // Check if report already exists
+    const { data: existingReport } = await supabase
       .from('reports')
-      .upsert({
-        contract_id: contractId,
-        pdf_url: publicUrl
-      }, {
-        onConflict: 'contract_id'
-      });
+      .select('id')
+      .eq('contract_id', contractId)
+      .maybeSingle();
+
+    let dbError;
+    
+    if (existingReport) {
+      // Update existing report
+      const { error } = await supabase
+        .from('reports')
+        .update({
+          pdf_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('contract_id', contractId);
+      dbError = error;
+    } else {
+      // Insert new report
+      const { error } = await supabase
+        .from('reports')
+        .insert({
+          contract_id: contractId,
+          pdf_url: publicUrl
+        });
+      dbError = error;
+    }
 
     if (dbError) {
       console.error('Database error:', dbError);
