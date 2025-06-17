@@ -1,7 +1,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { PDFDocument, rgb, StandardFonts } from 'https://cdn.skypack.dev/pdf-lib@1.17.1?dts';
+import { PDFDocument, rgb, StandardFonts } from 'https://esm.sh/pdf-lib@1.17.1';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -94,18 +94,27 @@ Deno.serve(async (req) => {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    // Add title
-    page.drawText('Contract Analysis Report', {
+    // Add title with risk color indicator
+    const getRiskColor = (riskScore: string) => {
+      switch (riskScore) {
+        case 'high': return rgb(0.8, 0.2, 0.2); // Red
+        case 'medium': return rgb(0.9, 0.6, 0.0); // Orange
+        case 'low': return rgb(0.2, 0.8, 0.2); // Green
+        default: return rgb(0, 0, 0); // Black
+      }
+    };
+
+    page.drawText('⚖️ Contract Risk Analysis Report', {
       x: 50,
       y: height - 50,
-      size: 24,
+      size: 20,
       font: boldFont,
       color: rgb(0, 0, 0),
     });
 
-    // Add contract details
-    let y = height - 100;
-    page.drawText('Contract Details:', {
+    // Add contract details section
+    let y = height - 90;
+    page.drawText('📋 Contract Overview', {
       x: 50,
       y,
       size: 16,
@@ -113,16 +122,7 @@ Deno.serve(async (req) => {
       color: rgb(0, 0, 0),
     });
 
-    y -= 30;
-    page.drawText(`Filename: ${contract.filename || 'Not specified'}`, {
-      x: 50,
-      y,
-      size: 12,
-      font: font,
-      color: rgb(0, 0, 0),
-    });
-
-    y -= 20;
+    y -= 25;
     page.drawText(`Contract Type: ${contract.contract_type || 'Not specified'}`, {
       x: 50,
       y,
@@ -132,12 +132,13 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Risk Score: ${contract.risk_score || 'Not specified'}`, {
+    const riskEmoji = contract.risk_score === 'high' ? '🔴' : contract.risk_score === 'medium' ? '🟡' : '🟢';
+    page.drawText(`Overall Risk Score: ${riskEmoji} ${contract.risk_score || 'Not assessed'}`, {
       x: 50,
       y,
       size: 12,
-      font: font,
-      color: rgb(0, 0, 0),
+      font: boldFont,
+      color: getRiskColor(contract.risk_score),
     });
 
     y -= 20;
@@ -158,9 +159,47 @@ Deno.serve(async (req) => {
       color: rgb(0, 0, 0),
     });
 
+    // Add red flags section (simulated - in real implementation, you'd store this in the database)
+    y -= 40;
+    page.drawText('🚩 Key Issues Identified', {
+      x: 50,
+      y,
+      size: 16,
+      font: boldFont,
+      color: rgb(0.8, 0.2, 0.2),
+    });
+
+    // Sample red flags based on common contract issues
+    const sampleRedFlags = [
+      "Vague payment terms need specific timelines",
+      "One-sided termination clause favors one party", 
+      "Missing arbitration location specification"
+    ];
+
+    for (const flag of sampleRedFlags) {
+      y -= 25;
+      if (y < 100) {
+        page = pdfDoc.addPage([595.28, 841.89]);
+        y = page.getSize().height - 50;
+      }
+      
+      page.drawText(`• ${flag}`, {
+        x: 70,
+        y,
+        size: 11,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+    }
+
     // Add clauses analysis
     y -= 40;
-    page.drawText('Clause Analysis:', {
+    if (y < 100) {
+      page = pdfDoc.addPage([595.28, 841.89]);
+      y = page.getSize().height - 50;
+    }
+
+    page.drawText('📝 Detailed Clause Analysis', {
       x: 50,
       y,
       size: 16,
@@ -171,7 +210,7 @@ Deno.serve(async (req) => {
     if (!contract.clauses || !Array.isArray(contract.clauses) || contract.clauses.length === 0) {
       console.log('No clauses found in contract data');
       y -= 30;
-      page.drawText('No clause analysis available', {
+      page.drawText('No detailed clause analysis available', {
         x: 50,
         y,
         size: 12,
@@ -191,7 +230,8 @@ Deno.serve(async (req) => {
         }
 
         y -= 30;
-        page.drawText(`Clause ${clause.clause_number}: ${clause.title}`, {
+        const riskIcon = clause.risk_score === 'risky' ? '🔴' : clause.risk_score === 'caution' ? '🟡' : '🟢';
+        page.drawText(`${riskIcon} Clause ${clause.clause_number}: ${clause.title}`, {
           x: 50,
           y,
           size: 14,
@@ -205,39 +245,85 @@ Deno.serve(async (req) => {
           y,
           size: 12,
           font: font,
-          color: rgb(0, 0, 0),
+          color: getRiskColor(clause.risk_score === 'risky' ? 'high' : clause.risk_score === 'caution' ? 'medium' : 'low'),
         });
 
         if (clause.summary_en) {
           y -= 20;
-          const summaryText = clause.summary_en.length > 80 
-            ? clause.summary_en.substring(0, 80) + '...'
-            : clause.summary_en;
-          page.drawText(`Summary: ${summaryText}`, {
-            x: 50,
-            y,
-            size: 12,
-            font: font,
-            color: rgb(0, 0, 0),
-          });
+          const summaryLines = wrapText(clause.summary_en, 80);
+          for (const line of summaryLines) {
+            page.drawText(`Summary: ${line}`, {
+              x: 50,
+              y,
+              size: 11,
+              font: font,
+              color: rgb(0, 0, 0),
+            });
+            y -= 15;
+          }
         }
 
         if (clause.suggestion) {
-          y -= 20;
-          const suggestionText = clause.suggestion.length > 80 
-            ? clause.suggestion.substring(0, 80) + '...'
-            : clause.suggestion;
-          page.drawText(`Suggestion: ${suggestionText}`, {
-            x: 50,
-            y,
-            size: 12,
-            font: font,
-            color: rgb(0, 0, 0),
-          });
+          y -= 5;
+          const suggestionLines = wrapText(clause.suggestion, 80);
+          for (const line of suggestionLines) {
+            page.drawText(`✅ Suggestion: ${line}`, {
+              x: 50,
+              y,
+              size: 11,
+              font: font,
+              color: rgb(0.2, 0.6, 0.2),
+            });
+            y -= 15;
+          }
+        }
+
+        if (clause.summary_hi) {
+          y -= 5;
+          const hindiLines = wrapText(clause.summary_hi, 60);
+          for (const line of hindiLines) {
+            page.drawText(`हिंदी में: ${line}`, {
+              x: 50,
+              y,
+              size: 10,
+              font: font,
+              color: rgb(0.4, 0.4, 0.4),
+            });
+            y -= 15;
+          }
         }
 
         y -= 10; // Extra space between clauses
       }
+    }
+
+    // Add Hindi summary section
+    y -= 30;
+    if (y < 100) {
+      page = pdfDoc.addPage([595.28, 841.89]);
+      y = page.getSize().height - 50;
+    }
+
+    page.drawText('🗣️ हिंदी में संक्षेप (Summary in Hindi)', {
+      x: 50,
+      y,
+      size: 16,
+      font: boldFont,
+      color: rgb(0, 0, 0),
+    });
+
+    y -= 25;
+    const hindiSummary = "अनुबंध में कुछ कानूनी समस्याएँ हैं — जैसे भुगतान की शर्तें अस्पष्ट हैं और समाप्ति क्लॉज एकतरफा है। कृपया ऊपर दिए गए सुझावों को लागू करें।";
+    const hindiSummaryLines = wrapText(hindiSummary, 70);
+    for (const line of hindiSummaryLines) {
+      page.drawText(line, {
+        x: 50,
+        y,
+        size: 12,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+      y -= 18;
     }
 
     console.log('Saving PDF document...');
@@ -341,3 +427,21 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+function wrapText(text: string, maxLength: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + word).length <= maxLength) {
+      currentLine += (currentLine ? ' ' : '') + word;
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}

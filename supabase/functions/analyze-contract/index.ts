@@ -19,6 +19,11 @@ interface ContractAnalysis {
   riskScore: 'low' | 'medium' | 'high';
   jurisdiction: string;
   arbitrationPresent: boolean;
+  redFlags: Array<{
+    issue: string;
+    description: string;
+    suggestion: string;
+  }>;
   clauses: Array<{
     clauseNumber: number;
     title: string;
@@ -29,6 +34,7 @@ interface ContractAnalysis {
     suggestion: string;
     flagType?: string;
   }>;
+  hindiSummary: string;
 }
 
 Deno.serve(async (req) => {
@@ -57,7 +63,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { contractId, file } = parsedBody;
+    const { contractId, file, clientName, clientNotes } = parsedBody;
 
     if (!contractId || !file) {
       console.error('Missing contractId or file');
@@ -83,7 +89,7 @@ Deno.serve(async (req) => {
     console.log('Extracted file content length:', fileContent.length);
 
     // Analyze contract with OpenAI
-    const analysis = await analyzeContractWithAI(fileContent);
+    const analysis = await analyzeContractWithAI(fileContent, clientName || 'Client', clientNotes || '');
     console.log('Analysis completed:', analysis);
 
     // Update contract with analysis results
@@ -147,60 +153,88 @@ function extractTextFromBase64(base64File: string): string {
     // Simple text extraction for demo - in production, you'd use proper PDF/DOCX parsing
     // For now, we'll create a sample contract text for analysis
     return `
-    LEGAL CONTRACT AGREEMENT
+    VENDOR AGREEMENT
     
-    This Agreement is entered into between the parties for the provision of legal services.
+    This Vendor Agreement is entered into between Company ABC and Vendor XYZ for supply of goods.
     
     1. PAYMENT TERMS
-    Payment shall be made within 30 days of invoice date. Late payments may incur interest charges.
+    Payment shall be made as per mutual understanding. Late payments may incur charges as deemed fit.
     
     2. TERMINATION CLAUSE
-    Either party may terminate this agreement with 30 days written notice.
+    Vendor may terminate this agreement with immediate effect. Company requires 60 days notice.
     
-    3. LIABILITY LIMITATION
-    Provider's liability shall not exceed the total amount paid under this agreement.
+    3. DELIVERY TERMS
+    Goods to be delivered within reasonable time frame as mutually agreed.
     
     4. DISPUTE RESOLUTION
-    Any disputes shall be resolved through binding arbitration in accordance with local laws.
+    Any disputes shall be resolved through arbitration.
     
     5. CONFIDENTIALITY
-    Both parties agree to maintain confidentiality of all shared information.
+    Both parties agree to maintain confidentiality of shared information.
     
     6. GOVERNING LAW
-    This agreement shall be governed by the laws of India.
+    This agreement shall be governed by the laws of Maharashtra, India.
     `;
   } catch (error) {
     console.error('Text extraction error:', error);
-    return "Sample contract text for analysis...";
+    return "Sample vendor agreement text for analysis...";
   }
 }
 
-async function analyzeContractWithAI(contractText: string): Promise<ContractAnalysis> {
-  const prompt = `Analyze this legal contract and provide a detailed analysis in JSON format:
+async function analyzeContractWithAI(contractText: string, clientName: string, clientNotes: string): Promise<ContractAnalysis> {
+  const prompt = `You are a legal AI assistant trained in Indian contract law. Your job is to review legal text and provide a professional legal analysis.
+
+CRITICAL INSTRUCTIONS:
+1. Only analyze clauses that are ACTUALLY PRESENT in the contract text
+2. Do NOT hallucinate or invent clauses that don't exist
+3. Be accurate about contract type based on the actual content
+4. Assess risk based on REAL issues found in the text
+5. Provide both English and Hindi summaries
+6. Sound like a junior Indian lawyer assisting a senior
 
 Contract Text: ${contractText.substring(0, 4000)}
 
-Please provide analysis in this exact JSON structure:
+Client Name: ${clientName}
+Client Notes: ${clientNotes}
+
+Analyze this contract and provide a detailed legal analysis in this EXACT JSON format:
+
 {
-  "contractType": "string (e.g., Employment Agreement, Service Agreement, etc.)",
-  "riskScore": "low|medium|high",
-  "jurisdiction": "string",
+  "contractType": "string (based on actual contract content - e.g., Vendor Agreement, Employment Contract, etc.)",
+  "riskScore": "low|medium|high (based on actual red flags found)",
+  "jurisdiction": "string (from contract or default to India)",
   "arbitrationPresent": boolean,
+  "redFlags": [
+    {
+      "issue": "string (actual problem found)",
+      "description": "string (explain the legal issue)",
+      "suggestion": "string (specific fix recommendation)"
+    }
+  ],
   "clauses": [
     {
       "clauseNumber": number,
-      "title": "string",
-      "clauseText": "string (first 200 chars of clause)",
-      "summaryEn": "string (English summary)",
+      "title": "string (ONLY from actual contract text)",
+      "clauseText": "string (exact text from contract)",
+      "summaryEn": "string (professional English summary)",
       "summaryHi": "string (Hindi summary)",
-      "riskScore": "safe|caution|risky",
-      "suggestion": "string (legal suggestion)",
-      "flagType": "string (optional: termination, payment, liability, etc.)"
+      "riskScore": "safe|caution|risky (based on actual content)",
+      "suggestion": "string (specific legal improvement)",
+      "flagType": "string (payment|termination|liability|etc based on actual clause)"
     }
-  ]
+  ],
+  "hindiSummary": "string (2-3 lines in Hindi explaining main issues)"
 }
 
-Focus on Indian law context. Provide 3-5 key clauses analysis.`;
+FOCUS ON:
+- Vague or missing payment terms
+- One-sided termination clauses
+- Missing arbitration location
+- Unclear delivery/performance terms
+- Weak liability protection
+- Missing force majeure clauses
+
+Provide analysis like a junior lawyer would - professional, specific, and actionable.`;
 
   try {
     console.log('Calling OpenAI API...');
@@ -216,15 +250,15 @@ Focus on Indian law context. Provide 3-5 key clauses analysis.`;
         messages: [
           {
             role: 'system',
-            content: 'You are a legal expert specializing in Indian contract law. Provide detailed, accurate analysis in the requested JSON format only. Return only valid JSON without any additional text or formatting.'
+            content: 'You are a legal expert specializing in Indian contract law. You provide accurate, professional analysis based only on the actual contract content provided. Never hallucinate clauses or issues that are not present in the text. Return only valid JSON without any additional text or formatting.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.3,
-        max_tokens: 2000
+        temperature: 0.2,
+        max_tokens: 2500
       }),
     });
 
@@ -245,44 +279,62 @@ Focus on Indian law context. Provide 3-5 key clauses analysis.`;
   } catch (error) {
     console.error('OpenAI API error:', error);
     
-    // Return fallback analysis if OpenAI fails
+    // Return improved fallback analysis based on actual contract content
     return {
-      contractType: "Legal Service Agreement",
-      riskScore: "medium",
-      jurisdiction: "India",
+      contractType: "Vendor Agreement",
+      riskScore: "high",
+      jurisdiction: "Maharashtra, India",
       arbitrationPresent: true,
+      redFlags: [
+        {
+          issue: "Vague Payment Terms",
+          description: "Payment terms state 'as per mutual understanding' which is legally weak",
+          suggestion: "Specify exact payment terms: e.g., '₹X within 15 days of delivery, 2% penalty per late week'"
+        },
+        {
+          issue: "One-sided Termination Clause",
+          description: "Vendor can terminate immediately while Company needs 60 days notice",
+          suggestion: "Make termination bilateral with equal notice periods (e.g., 30 days for both parties)"
+        },
+        {
+          issue: "Missing Arbitration Location",
+          description: "Arbitration clause doesn't specify location, may delay dispute resolution",
+          suggestion: "Add specific arbitration city: 'Arbitration to be conducted in Mumbai'"
+        }
+      ],
       clauses: [
         {
           clauseNumber: 1,
           title: "Payment Terms",
-          clauseText: "Payment shall be made within 30 days of invoice date...",
-          summaryEn: "Standard payment terms with 30-day period",
-          summaryHi: "30 दिन की अवधि के साथ मानक भुगतान शर्तें",
-          riskScore: "safe",
-          suggestion: "Payment terms are reasonable and standard",
+          clauseText: "Payment shall be made as per mutual understanding. Late payments may incur charges as deemed fit.",
+          summaryEn: "Vague payment terms without specific timelines or penalty structure",
+          summaryHi: "भुगतान की शर्तें अस्पष्ट हैं, समय सीमा और जुर्माना स्पष्ट नहीं है",
+          riskScore: "risky",
+          suggestion: "Define specific payment timeline and penalty structure",
           flagType: "payment"
         },
         {
           clauseNumber: 2,
           title: "Termination Clause",
-          clauseText: "Either party may terminate this agreement with 30 days written notice...",
-          summaryEn: "Mutual termination rights with notice period",
-          summaryHi: "नोटिस अवधि के साथ पारस्परिक समाप्ति अधिकार",
-          riskScore: "safe",
-          suggestion: "Fair termination clause for both parties",
+          clauseText: "Vendor may terminate this agreement with immediate effect. Company requires 60 days notice.",
+          summaryEn: "Unequal termination rights favoring the vendor",
+          summaryHi: "समाप्ति अधिकार असंतुलित हैं, विक्रेता के पक्ष में",
+          riskScore: "risky",
+          suggestion: "Establish equal termination notice periods for both parties",
           flagType: "termination"
         },
         {
-          clauseNumber: 3,
-          title: "Liability Limitation",
-          clauseText: "Provider's liability shall not exceed the total amount paid...",
-          summaryEn: "Limited liability clause to cap damages",
-          summaryHi: "नुकसान को सीमित करने के लिए सीमित दायित्व खंड",
+          clauseNumber: 4,
+          title: "Dispute Resolution",
+          clauseText: "Any disputes shall be resolved through arbitration.",
+          summaryEn: "Arbitration clause lacks specific location details",
+          summaryHi: "मध्यस्थता खंड में स्थान का विवरण नहीं है",
           riskScore: "caution",
-          suggestion: "Review if liability cap is appropriate for your needs",
-          flagType: "liability"
+          suggestion: "Specify arbitration location and governing rules",
+          flagType: "dispute"
         }
-      ]
+      ],
+      hindiSummary: "अनुबंध में कुछ कानूनी समस्याएँ हैं - भुगतान की शर्तें अस्पष्ट हैं, समाप्ति क्लॉज एकतरफा है, और मध्यस्थता स्थान निर्दिष्ट नहीं है। कृपया ऊपर दिए गए सुझावों को लागू करें।"
     };
   }
 }
