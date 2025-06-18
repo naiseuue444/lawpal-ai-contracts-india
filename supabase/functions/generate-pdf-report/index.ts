@@ -292,33 +292,18 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (clause.summary_hi) {
-          y -= 5;
-          const hindiLines = wrapText(clause.summary_hi, 60);
-          for (const line of hindiLines) {
-            page.drawText(`Hindi: ${line}`, {
-              x: 50,
-              y,
-              size: 10,
-              font: font,
-              color: rgb(0.4, 0.4, 0.4),
-            });
-            y -= 15;
-          }
-        }
-
         y -= 10; // Extra space between clauses
       }
     }
 
-    // Add Hindi summary section
+    // Add English summary section instead of Hindi
     y -= 30;
     if (y < 100) {
       page = pdfDoc.addPage([595.28, 841.89]);
       y = page.getSize().height - 50;
     }
 
-    page.drawText('SUMMARY IN HINDI', {
+    page.drawText('SUMMARY', {
       x: 50,
       y,
       size: 16,
@@ -327,9 +312,9 @@ Deno.serve(async (req) => {
     });
 
     y -= 25;
-    const hindiSummary = "अनुबंध की समीक्षा पूर्ण हो गई है। कृपया ऊपर दिए गए सुझावों को ध्यान से पढ़ें और आवश्यक बदलाव करें।";
-    const hindiSummaryLines = wrapText(hindiSummary, 70);
-    for (const line of hindiSummaryLines) {
+    const summary = "Contract analysis has been completed. Please review the identified issues and suggestions above to improve your contract terms.";
+    const summaryLines = wrapText(summary, 70);
+    for (const line of summaryLines) {
       page.drawText(line, {
         x: 50,
         y,
