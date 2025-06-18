@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       }
     };
 
-    page.drawText('⚖️ Contract Risk Analysis Report', {
+    page.drawText('CONTRACT RISK ANALYSIS REPORT', {
       x: 50,
       y: height - 50,
       size: 20,
@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
 
     // Add contract details section
     let y = height - 90;
-    page.drawText('📋 Contract Overview', {
+    page.drawText('Contract Overview', {
       x: 50,
       y,
       size: 16,
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    const riskEmoji = contract.risk_score === 'high' ? '🔴' : contract.risk_score === 'medium' ? '🟡' : '🟢';
+    const riskEmoji = contract.risk_score === 'high' ? '[HIGH RISK]' : contract.risk_score === 'medium' ? '[MEDIUM RISK]' : '[LOW RISK]';
     page.drawText(`Overall Risk Score: ${riskEmoji} ${contract.risk_score || 'Not assessed'}`, {
       x: 50,
       y,
@@ -161,7 +161,7 @@ Deno.serve(async (req) => {
 
     // Add red flags section
     y -= 40;
-    page.drawText('🚩 Key Issues Identified', {
+    page.drawText('KEY ISSUES IDENTIFIED', {
       x: 50,
       y,
       size: 16,
@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
         y = page.getSize().height - 50;
       }
       
-      page.drawText(`• ${flag}`, {
+      page.drawText(`- ${flag}`, {
         x: 70,
         y,
         size: 11,
@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
       y = page.getSize().height - 50;
     }
 
-    page.drawText('📝 Detailed Clause Analysis', {
+    page.drawText('DETAILED CLAUSE ANALYSIS', {
       x: 50,
       y,
       size: 16,
@@ -244,7 +244,7 @@ Deno.serve(async (req) => {
         }
 
         y -= 30;
-        const riskIcon = clause.risk_score === 'risky' ? '🔴' : clause.risk_score === 'caution' ? '🟡' : '🟢';
+        const riskIcon = clause.risk_score === 'risky' ? '[HIGH RISK]' : clause.risk_score === 'caution' ? '[CAUTION]' : '[SAFE]';
         page.drawText(`${riskIcon} Clause ${clause.clause_number}: ${clause.title}`, {
           x: 50,
           y,
@@ -281,7 +281,7 @@ Deno.serve(async (req) => {
           y -= 5;
           const suggestionLines = wrapText(clause.suggestion, 80);
           for (const line of suggestionLines) {
-            page.drawText(`✅ Suggestion: ${line}`, {
+            page.drawText(`Suggestion: ${line}`, {
               x: 50,
               y,
               size: 11,
@@ -296,7 +296,7 @@ Deno.serve(async (req) => {
           y -= 5;
           const hindiLines = wrapText(clause.summary_hi, 60);
           for (const line of hindiLines) {
-            page.drawText(`हिंदी में: ${line}`, {
+            page.drawText(`Hindi: ${line}`, {
               x: 50,
               y,
               size: 10,
@@ -318,7 +318,7 @@ Deno.serve(async (req) => {
       y = page.getSize().height - 50;
     }
 
-    page.drawText('🗣️ हिंदी में संक्षेप (Summary in Hindi)', {
+    page.drawText('SUMMARY IN HINDI', {
       x: 50,
       y,
       size: 16,
