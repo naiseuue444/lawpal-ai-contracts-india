@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
       color: rgb(0, 0, 0),
     });
 
-    // Add red flags section (simulated - in real implementation, you'd store this in the database)
+    // Add red flags section
     y -= 40;
     page.drawText('🚩 Key Issues Identified', {
       x: 50,
@@ -169,14 +169,28 @@ Deno.serve(async (req) => {
       color: rgb(0.8, 0.2, 0.2),
     });
 
-    // Sample red flags based on common contract issues
-    const sampleRedFlags = [
-      "Vague payment terms need specific timelines",
-      "One-sided termination clause favors one party", 
-      "Missing arbitration location specification"
-    ];
+    // Generate red flags based on actual contract data
+    const redFlags = [];
+    
+    if (contract.clauses && Array.isArray(contract.clauses)) {
+      const riskyClause = contract.clauses.find(c => c.risk_score === 'risky');
+      const cautionClause = contract.clauses.find(c => c.risk_score === 'caution');
+      
+      if (riskyClause) {
+        redFlags.push(`${riskyClause.title}: ${riskyClause.suggestion || 'Requires attention'}`);
+      }
+      if (cautionClause && cautionClause.id !== riskyClause?.id) {
+        redFlags.push(`${cautionClause.title}: ${cautionClause.suggestion || 'Needs review'}`);
+      }
+    }
+    
+    // Default red flags if none found
+    if (redFlags.length === 0) {
+      redFlags.push("Review contract terms carefully");
+      redFlags.push("Consider legal consultation for complex clauses");
+    }
 
-    for (const flag of sampleRedFlags) {
+    for (const flag of redFlags) {
       y -= 25;
       if (y < 100) {
         page = pdfDoc.addPage([595.28, 841.89]);
@@ -313,7 +327,7 @@ Deno.serve(async (req) => {
     });
 
     y -= 25;
-    const hindiSummary = "अनुबंध में कुछ कानूनी समस्याएँ हैं — जैसे भुगतान की शर्तें अस्पष्ट हैं और समाप्ति क्लॉज एकतरफा है। कृपया ऊपर दिए गए सुझावों को लागू करें।";
+    const hindiSummary = "अनुबंध की समीक्षा पूर्ण हो गई है। कृपया ऊपर दिए गए सुझावों को ध्यान से पढ़ें और आवश्यक बदलाव करें।";
     const hindiSummaryLines = wrapText(hindiSummary, 70);
     for (const line of hindiSummaryLines) {
       page.drawText(line, {
@@ -333,19 +347,27 @@ Deno.serve(async (req) => {
 
     console.log('Uploading PDF to storage...');
     
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage with better error handling
     const fileName = `reports/${contractId}-${Date.now()}.pdf`;
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('contract-reports')
-      .upload(fileName, pdfBytes, {
-        contentType: 'application/pdf',
-        upsert: true
-      });
+    
+    try {
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('contract-reports')
+        .upload(fileName, pdfBytes, {
+          contentType: 'application/pdf',
+          upsert: true
+        });
 
-    if (uploadError) {
-      console.error('Storage upload error:', uploadError);
+      if (uploadError) {
+        console.error('Storage upload error:', uploadError);
+        throw new Error('Failed to upload PDF: ' + uploadError.message);
+      }
+
+      console.log('Upload successful:', uploadData);
+    } catch (storageError) {
+      console.error('Storage operation failed:', storageError);
       return new Response(
-        JSON.stringify({ error: 'Failed to upload PDF report: ' + uploadError.message }),
+        JSON.stringify({ error: 'Storage upload failed: ' + storageError.message }),
         { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -359,6 +381,8 @@ Deno.serve(async (req) => {
     const { data: { publicUrl } } = supabase.storage
       .from('contract-reports')
       .getPublicUrl(fileName);
+
+    console.log('Public URL generated:', publicUrl);
 
     console.log('Saving report reference in database...');
     
@@ -377,7 +401,7 @@ Deno.serve(async (req) => {
         .from('reports')
         .update({
           pdf_url: publicUrl,
-          updated_at: new Date().toISOString()
+          generated_on: new Date().toISOString()
         })
         .eq('contract_id', contractId);
       dbError = error;
