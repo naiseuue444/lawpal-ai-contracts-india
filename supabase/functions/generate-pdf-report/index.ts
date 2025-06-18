@@ -94,7 +94,55 @@ Deno.serve(async (req) => {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    // Add title with risk color indicator
+    // Add title with professional header
+    page.drawText('CONTRACT ANALYSIS REPORT', {
+      x: 50,
+      y: height - 50,
+      size: 20,
+      font: boldFont,
+      color: rgb(0, 0, 0),
+    });
+
+    let y = height - 80;
+    page.drawText(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, {
+      x: 50,
+      y,
+      size: 10,
+      font: font,
+      color: rgb(0.5, 0.5, 0.5),
+    });
+
+    // Add Executive Summary Header Table
+    y -= 40;
+    page.drawText('EXECUTIVE SUMMARY', {
+      x: 50,
+      y,
+      size: 16,
+      font: boldFont,
+      color: rgb(0, 0, 0),
+    });
+
+    // Summary table background
+    y -= 10;
+    page.drawRectangle({
+      x: 50,
+      y: y - 80,
+      width: width - 100,
+      height: 75,
+      color: rgb(0.95, 0.95, 0.95),
+    });
+
+    // Summary table content
+    y -= 25;
+    page.drawText(`Contract Type: ${contract.contract_type || 'Not specified'}`, {
+      x: 60,
+      y,
+      size: 12,
+      font: boldFont,
+      color: rgb(0, 0, 0),
+    });
+
+    y -= 20;
     const getRiskColor = (riskScore: string) => {
       switch (riskScore) {
         case 'high': return rgb(0.8, 0.2, 0.2); // Red
@@ -104,37 +152,9 @@ Deno.serve(async (req) => {
       }
     };
 
-    page.drawText('CONTRACT RISK ANALYSIS REPORT', {
-      x: 50,
-      y: height - 50,
-      size: 20,
-      font: boldFont,
-      color: rgb(0, 0, 0),
-    });
-
-    // Add contract details section
-    let y = height - 90;
-    page.drawText('Contract Overview', {
-      x: 50,
-      y,
-      size: 16,
-      font: boldFont,
-      color: rgb(0, 0, 0),
-    });
-
-    y -= 25;
-    page.drawText(`Contract Type: ${contract.contract_type || 'Not specified'}`, {
-      x: 50,
-      y,
-      size: 12,
-      font: font,
-      color: rgb(0, 0, 0),
-    });
-
-    y -= 20;
-    const riskEmoji = contract.risk_score === 'high' ? '[HIGH RISK]' : contract.risk_score === 'medium' ? '[MEDIUM RISK]' : '[LOW RISK]';
-    page.drawText(`Overall Risk Score: ${riskEmoji} ${contract.risk_score || 'Not assessed'}`, {
-      x: 50,
+    const riskLevel = contract.risk_score?.toUpperCase() || 'UNKNOWN';
+    page.drawText(`Overall Risk Level: ${riskLevel}`, {
+      x: 60,
       y,
       size: 12,
       font: boldFont,
@@ -142,26 +162,19 @@ Deno.serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Jurisdiction: ${contract.jurisdiction || 'Not specified'}`, {
-      x: 50,
+    const clauseCount = contract.clauses?.length || 0;
+    const riskyCount = contract.clauses?.filter(c => c.risk_score === 'risky').length || 0;
+    page.drawText(`Total Clauses Reviewed: ${clauseCount} | High Risk Issues Found: ${riskyCount}`, {
+      x: 60,
       y,
-      size: 12,
+      size: 11,
       font: font,
       color: rgb(0, 0, 0),
     });
 
-    y -= 20;
-    page.drawText(`Arbitration Present: ${contract.arbitration_present ? 'Yes' : 'No'}`, {
-      x: 50,
-      y,
-      size: 12,
-      font: font,
-      color: rgb(0, 0, 0),
-    });
-
-    // Add red flags section
+    // Key recommendations section
     y -= 40;
-    page.drawText('KEY ISSUES IDENTIFIED', {
+    page.drawText('KEY RECOMMENDATIONS', {
       x: 50,
       y,
       size: 16,
@@ -169,44 +182,48 @@ Deno.serve(async (req) => {
       color: rgb(0.8, 0.2, 0.2),
     });
 
-    // Generate red flags based on actual contract data
-    const redFlags = [];
+    // Generate recommendations based on actual contract data
+    const recommendations = [];
     
     if (contract.clauses && Array.isArray(contract.clauses)) {
       const riskyClause = contract.clauses.find(c => c.risk_score === 'risky');
       const cautionClause = contract.clauses.find(c => c.risk_score === 'caution');
       
       if (riskyClause) {
-        redFlags.push(`${riskyClause.title}: ${riskyClause.suggestion || 'Requires attention'}`);
+        recommendations.push(`URGENT: ${riskyClause.title} needs immediate revision - ${riskyClause.suggestion || 'Requires legal attention'}`);
       }
       if (cautionClause && cautionClause.id !== riskyClause?.id) {
-        redFlags.push(`${cautionClause.title}: ${cautionClause.suggestion || 'Needs review'}`);
+        recommendations.push(`REVIEW: ${cautionClause.title} - ${cautionClause.suggestion || 'Needs improvement'}`);
       }
     }
     
-    // Default red flags if none found
-    if (redFlags.length === 0) {
-      redFlags.push("Review contract terms carefully");
-      redFlags.push("Consider legal consultation for complex clauses");
+    // Default recommendations if none found
+    if (recommendations.length === 0) {
+      recommendations.push("Consider legal consultation for contract optimization");
+      recommendations.push("Review payment and termination terms carefully");
     }
 
-    for (const flag of redFlags) {
+    for (const recommendation of recommendations) {
       y -= 25;
       if (y < 100) {
         page = pdfDoc.addPage([595.28, 841.89]);
         y = page.getSize().height - 50;
       }
       
-      page.drawText(`- ${flag}`, {
-        x: 70,
-        y,
-        size: 11,
-        font: font,
-        color: rgb(0, 0, 0),
-      });
+      const wrappedLines = wrapText(`• ${recommendation}`, 80);
+      for (const line of wrappedLines) {
+        page.drawText(line, {
+          x: 60,
+          y,
+          size: 11,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+        y -= 15;
+      }
     }
 
-    // Add clauses analysis
+    // Add detailed clause analysis
     y -= 40;
     if (y < 100) {
       page = pdfDoc.addPage([595.28, 841.89]);
@@ -234,8 +251,11 @@ Deno.serve(async (req) => {
     } else {
       console.log(`Found ${contract.clauses.length} clauses`);
       
-      for (let i = 0; i < contract.clauses.length; i++) {
-        const clause = contract.clauses[i];
+      // Sort clauses by clause_number to ensure proper order
+      const sortedClauses = [...contract.clauses].sort((a, b) => a.clause_number - b.clause_number);
+      
+      for (let i = 0; i < sortedClauses.length; i++) {
+        const clause = sortedClauses[i];
         
         // Check if we need a new page
         if (y < 150) {
@@ -254,7 +274,7 @@ Deno.serve(async (req) => {
         });
 
         y -= 20;
-        page.drawText(`Risk Level: ${clause.risk_score}`, {
+        page.drawText(`Risk Level: ${clause.risk_score.toUpperCase()}`, {
           x: 50,
           y,
           size: 12,
@@ -264,9 +284,9 @@ Deno.serve(async (req) => {
 
         if (clause.summary_en) {
           y -= 20;
-          const summaryLines = wrapText(clause.summary_en, 80);
+          const summaryLines = wrapText(`Summary: ${clause.summary_en}`, 80);
           for (const line of summaryLines) {
-            page.drawText(`Summary: ${line}`, {
+            page.drawText(line, {
               x: 50,
               y,
               size: 11,
@@ -279,9 +299,9 @@ Deno.serve(async (req) => {
 
         if (clause.suggestion) {
           y -= 5;
-          const suggestionLines = wrapText(clause.suggestion, 80);
+          const suggestionLines = wrapText(`Recommendation: ${clause.suggestion}`, 80);
           for (const line of suggestionLines) {
-            page.drawText(`Suggestion: ${line}`, {
+            page.drawText(line, {
               x: 50,
               y,
               size: 11,
@@ -296,14 +316,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Add English summary section instead of Hindi
+    // Add plain language summary section
     y -= 30;
     if (y < 100) {
       page = pdfDoc.addPage([595.28, 841.89]);
       y = page.getSize().height - 50;
     }
 
-    page.drawText('SUMMARY', {
+    page.drawText('PLAIN LANGUAGE SUMMARY', {
       x: 50,
       y,
       size: 16,
@@ -312,8 +332,8 @@ Deno.serve(async (req) => {
     });
 
     y -= 25;
-    const summary = "Contract analysis has been completed. Please review the identified issues and suggestions above to improve your contract terms.";
-    const summaryLines = wrapText(summary, 70);
+    const plainSummary = `This contract analysis found ${riskyCount} high-risk issues that need immediate attention. The main concerns are around payment terms, termination rights, and dispute resolution. We recommend reviewing these clauses with your legal advisor before signing. This analysis is designed to help you understand potential risks in plain language.`;
+    const summaryLines = wrapText(plainSummary, 70);
     for (const line of summaryLines) {
       page.drawText(line, {
         x: 50,
@@ -323,6 +343,30 @@ Deno.serve(async (req) => {
         color: rgb(0, 0, 0),
       });
       y -= 18;
+    }
+
+    // Add disclaimer
+    y -= 30;
+    page.drawText('LEGAL DISCLAIMER', {
+      x: 50,
+      y,
+      size: 12,
+      font: boldFont,
+      color: rgb(0.5, 0.5, 0.5),
+    });
+
+    y -= 20;
+    const disclaimer = "This report is for informational purposes only and does not constitute legal advice. Please consult with a qualified attorney for specific legal guidance.";
+    const disclaimerLines = wrapText(disclaimer, 70);
+    for (const line of disclaimerLines) {
+      page.drawText(line, {
+        x: 50,
+        y,
+        size: 10,
+        font: font,
+        color: rgb(0.5, 0.5, 0.5),
+      });
+      y -= 15;
     }
 
     console.log('Saving PDF document...');

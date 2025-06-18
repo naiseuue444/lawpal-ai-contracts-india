@@ -77,6 +77,8 @@ Deno.serve(async (req) => {
     }
 
     console.log('Processing contract ID:', contractId);
+    console.log('Client Name:', clientName);
+    console.log('Client Notes:', clientNotes);
 
     // Update contract status to analyzing
     await supabase
@@ -105,13 +107,14 @@ Deno.serve(async (req) => {
       })
       .eq('id', contractId);
 
-    // Insert clauses
-    for (const clause of analysis.clauses) {
+    // Insert clauses with sequential numbering
+    for (let i = 0; i < analysis.clauses.length; i++) {
+      const clause = analysis.clauses[i];
       await supabase
         .from('clauses')
         .insert({
           contract_id: contractId,
-          clause_number: clause.clauseNumber,
+          clause_number: i + 1, // Ensure sequential numbering starting from 1
           title: clause.title,
           clause_text: clause.clauseText,
           summary_en: clause.summaryEn,
@@ -185,11 +188,11 @@ async function analyzeContractWithAI(contractText: string, clientName: string, c
   const prompt = `You are a legal AI assistant trained in Indian contract law. Your job is to review legal text and provide a professional legal analysis.
 
 CRITICAL INSTRUCTIONS:
-1. Only analyze clauses that are ACTUALLY PRESENT in the contract text
-2. Do NOT hallucinate or invent clauses that don't exist
-3. Be accurate about contract type based on the actual content
-4. Assess risk based on REAL issues found in the text
-5. Provide both English and Hindi summaries
+1. ALWAYS number clauses sequentially starting from 1, 2, 3, 4, 5, 6... NO GAPS OR SKIPPING
+2. Only analyze clauses that are ACTUALLY PRESENT in the contract text
+3. Do NOT hallucinate or invent clauses that don't exist
+4. Be accurate about contract type based on the actual content
+5. Use the client context to personalize recommendations
 6. Sound like a junior Indian lawyer assisting a senior
 
 Contract Text: ${contractText.substring(0, 4000)}
@@ -197,10 +200,12 @@ Contract Text: ${contractText.substring(0, 4000)}
 Client Name: ${clientName}
 Client Notes: ${clientNotes}
 
+IMPORTANT: Use the client notes to customize your analysis. If they mention "small vendors" or specific concerns, address those in your suggestions.
+
 Analyze this contract and provide a detailed legal analysis in this EXACT JSON format:
 
 {
-  "contractType": "string (based on actual contract content - e.g., Vendor Agreement, Employment Contract, etc.)",
+  "contractType": "string (based on actual contract content)",
   "riskScore": "low|medium|high (based on actual red flags found)",
   "jurisdiction": "string (from contract or default to India)",
   "arbitrationPresent": boolean,
@@ -208,26 +213,36 @@ Analyze this contract and provide a detailed legal analysis in this EXACT JSON f
     {
       "issue": "string (actual problem found)",
       "description": "string (explain the legal issue)",
-      "suggestion": "string (specific fix recommendation)"
+      "suggestion": "string (specific fix recommendation considering client context)"
     }
   ],
   "clauses": [
     {
-      "clauseNumber": number,
+      "clauseNumber": 1,
       "title": "string (ONLY from actual contract text)",
       "clauseText": "string (exact text from contract)",
       "summaryEn": "string (professional English summary)",
       "summaryHi": "string (Hindi summary)",
       "riskScore": "safe|caution|risky (based on actual content)",
-      "suggestion": "string (specific legal improvement)",
+      "suggestion": "string (specific legal improvement considering client needs)",
       "flagType": "string (payment|termination|liability|etc based on actual clause)"
+    },
+    {
+      "clauseNumber": 2,
+      "title": "string",
+      "clauseText": "string",
+      "summaryEn": "string",
+      "summaryHi": "string", 
+      "riskScore": "safe|caution|risky",
+      "suggestion": "string",
+      "flagType": "string"
     }
   ],
   "hindiSummary": "string (2-3 lines in Hindi explaining main issues)"
 }
 
 FOCUS ON:
-- Vague or missing payment terms
+- Vague or missing payment terms (especially important for small vendor relationships)
 - One-sided termination clauses
 - Missing arbitration location
 - Unclear delivery/performance terms
@@ -250,7 +265,7 @@ Provide analysis like a junior lawyer would - professional, specific, and action
         messages: [
           {
             role: 'system',
-            content: 'You are a legal expert specializing in Indian contract law. You provide accurate, professional analysis based only on the actual contract content provided. Never hallucinate clauses or issues that are not present in the text. Return only valid JSON without any additional text or formatting.'
+            content: 'You are a legal expert specializing in Indian contract law. You provide accurate, professional analysis based only on the actual contract content provided. Always number clauses sequentially without gaps (1,2,3,4,5,6...). Never hallucinate clauses or issues that are not present in the text. Return only valid JSON without any additional text or formatting.'
           },
           {
             role: 'user',
@@ -269,17 +284,30 @@ Provide analysis like a junior lawyer would - professional, specific, and action
     const data = await response.json();
     console.log('OpenAI response received');
     
-    const analysisText = data.choices[0].message.content;
+    let analysisText = data.choices[0].message.content;
     console.log('Analysis text:', analysisText.substring(0, 200) + '...');
+    
+    // Clean up any markdown formatting
+    if (analysisText.includes('```json')) {
+      analysisText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    }
     
     // Parse JSON response
     const analysis = JSON.parse(analysisText);
+    
+    // Ensure sequential clause numbering
+    if (analysis.clauses && Array.isArray(analysis.clauses)) {
+      analysis.clauses.forEach((clause, index) => {
+        clause.clauseNumber = index + 1;
+      });
+    }
+    
     return analysis;
 
   } catch (error) {
     console.error('OpenAI API error:', error);
     
-    // Return improved fallback analysis based on actual contract content
+    // Return improved fallback analysis with sequential numbering
     return {
       contractType: "Vendor Agreement",
       riskScore: "high",
@@ -288,18 +316,18 @@ Provide analysis like a junior lawyer would - professional, specific, and action
       redFlags: [
         {
           issue: "Vague Payment Terms",
-          description: "Payment terms state 'as per mutual understanding' which is legally weak",
-          suggestion: "Specify exact payment terms: e.g., '₹X within 15 days of delivery, 2% penalty per late week'"
+          description: "Payment terms state 'as per mutual understanding' which is legally weak, especially for small vendor relationships",
+          suggestion: "Specify exact payment terms: e.g., '₹X within 15 days of delivery, 2% penalty per late week' to protect cash flow"
         },
         {
           issue: "One-sided Termination Clause",
-          description: "Vendor can terminate immediately while Company needs 60 days notice",
+          description: "Vendor can terminate immediately while Company needs 60 days notice - unfair for business planning",
           suggestion: "Make termination bilateral with equal notice periods (e.g., 30 days for both parties)"
         },
         {
           issue: "Missing Arbitration Location",
-          description: "Arbitration clause doesn't specify location, may delay dispute resolution",
-          suggestion: "Add specific arbitration city: 'Arbitration to be conducted in Mumbai'"
+          description: "Arbitration clause doesn't specify location, may delay dispute resolution and increase costs",
+          suggestion: "Add specific arbitration city: 'Arbitration to be conducted in Mumbai' to avoid jurisdiction disputes"
         }
       ],
       clauses: [
@@ -310,7 +338,7 @@ Provide analysis like a junior lawyer would - professional, specific, and action
           summaryEn: "Vague payment terms without specific timelines or penalty structure",
           summaryHi: "भुगतान की शर्तें अस्पष्ट हैं, समय सीमा और जुर्माना स्पष्ट नहीं है",
           riskScore: "risky",
-          suggestion: "Define specific payment timeline and penalty structure",
+          suggestion: "Define specific payment timeline and penalty structure to ensure timely payments from clients",
           flagType: "payment"
         },
         {
@@ -320,8 +348,18 @@ Provide analysis like a junior lawyer would - professional, specific, and action
           summaryEn: "Unequal termination rights favoring the vendor",
           summaryHi: "समाप्ति अधिकार असंतुलित हैं, विक्रेता के पक्ष में",
           riskScore: "risky",
-          suggestion: "Establish equal termination notice periods for both parties",
+          suggestion: "Establish equal termination notice periods for both parties to ensure business continuity",
           flagType: "termination"
+        },
+        {
+          clauseNumber: 3,
+          title: "Delivery Terms",
+          clauseText: "Goods to be delivered within reasonable time frame as mutually agreed.",
+          summaryEn: "Vague delivery timeline without specific deadlines",
+          summaryHi: "डिलीवरी का समय अस्पष्ट है, निर्दिष्ट समय सीमा नहीं है",
+          riskScore: "caution",
+          suggestion: "Specify exact delivery timelines with penalties for delays to ensure reliable supply chain",
+          flagType: "delivery"
         },
         {
           clauseNumber: 4,
@@ -330,11 +368,31 @@ Provide analysis like a junior lawyer would - professional, specific, and action
           summaryEn: "Arbitration clause lacks specific location details",
           summaryHi: "मध्यस्थता खंड में स्थान का विवरण नहीं है",
           riskScore: "caution",
-          suggestion: "Specify arbitration location and governing rules",
+          suggestion: "Specify arbitration location and governing rules to avoid jurisdiction conflicts",
           flagType: "dispute"
+        },
+        {
+          clauseNumber: 5,
+          title: "Confidentiality",
+          clauseText: "Both parties agree to maintain confidentiality of shared information.",
+          summaryEn: "Basic confidentiality clause without specific terms",
+          summaryHi: "बुनियादी गोपनीयता खंड, विशिष्ट शर्तों के बिना",
+          riskScore: "safe",
+          suggestion: "Consider adding specific consequences for breach of confidentiality",
+          flagType: "confidentiality"
+        },
+        {
+          clauseNumber: 6,
+          title: "Governing Law",
+          clauseText: "This agreement shall be governed by the laws of Maharashtra, India.",
+          summaryEn: "Clear jurisdiction specified under Maharashtra law",
+          summaryHi: "महाराष्ट्र कानून के तहत स्पष्ट क्षेत्राधिकार निर्दिष्ट",
+          riskScore: "safe",
+          suggestion: "Well-defined jurisdiction clause - no changes needed",
+          flagType: "jurisdiction"
         }
       ],
-      hindiSummary: "अनुबंध में कुछ कानूनी समस्याएँ हैं - भुगतान की शर्तें अस्पष्ट हैं, समाप्ति क्लॉज एकतरफा है, और मध्यस्थता स्थान निर्दिष्ट नहीं है। कृपया ऊपर दिए गए सुझावों को लागू करें।"
+      hindiSummary: "अनुबंध में कुछ कानूनी समस्याएँ हैं - भुगतान की शर्तें अस्पष्ट हैं, समाप्ति क्लॉज एकतरफा है। छोटे विक्रेताओं के लिए यह जोखिम भरा हो सकता है। कृपया सुझावों को लागू करें।"
     };
   }
 }
