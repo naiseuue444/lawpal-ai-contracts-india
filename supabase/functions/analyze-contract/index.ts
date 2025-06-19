@@ -39,6 +39,17 @@ interface ContractAnalysis {
   clientContext: string;
 }
 
+// Create a simple hash function for content consistency
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString();
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -92,8 +103,30 @@ Deno.serve(async (req) => {
     const fileContent = await extractTextUsingAI(file);
     console.log('Extracted file content length:', fileContent.length);
 
-    // Analyze contract with OpenAI
-    const analysis = await analyzeContractWithAI(fileContent, clientName || 'Client', clientNotes || '');
+    // Create content hash for consistency
+    const contentHash = simpleHash(fileContent);
+    console.log('Content hash:', contentHash);
+
+    // Check if we've analyzed similar content before
+    const { data: existingAnalysis } = await supabase
+      .from('contracts')
+      .select('risk_score, contract_type, jurisdiction, arbitration_present')
+      .eq('content_text', fileContent.substring(0, 10000))
+      .eq('analysis_status', 'completed')
+      .limit(1);
+
+    let analysis: ContractAnalysis;
+
+    if (existingAnalysis && existingAnalysis.length > 0) {
+      console.log('Found existing analysis for similar content, ensuring consistency');
+      // Use existing risk assessment for consistency, but generate new detailed analysis
+      const existingRisk = existingAnalysis[0].risk_score;
+      analysis = await analyzeContractWithAI(fileContent, clientName || 'Client', clientNotes || '', existingRisk);
+    } else {
+      console.log('No existing analysis found, performing fresh analysis');
+      analysis = await analyzeContractWithAI(fileContent, clientName || 'Client', clientNotes || '');
+    }
+
     console.log('Analysis completed:', analysis);
 
     // Update contract with analysis results
@@ -197,7 +230,7 @@ Return only the extracted text without any additional commentary.`
             ]
           }
         ],
-        temperature: 0.1,
+        temperature: 0.1, // Low temperature for consistent extraction
         max_tokens: 4000
       }),
     });
@@ -267,9 +300,13 @@ function extractTextFromBase64Fallback(base64File: string): string {
   }
 }
 
-async function analyzeContractWithAI(contractText: string, clientName: string, clientNotes: string): Promise<ContractAnalysis> {
+async function analyzeContractWithAI(contractText: string, clientName: string, clientNotes: string, consistentRiskScore?: string): Promise<ContractAnalysis> {
   const clientContext = clientNotes ? `Client Context: ${clientName} mentioned: "${clientNotes}"` : '';
   
+  const consistencyInstruction = consistentRiskScore 
+    ? `IMPORTANT: For consistency with previous analyses of this same document, the risk score MUST be "${consistentRiskScore}". Base your analysis around this risk level.`
+    : '';
+
   const prompt = `You are a legal AI assistant trained in Indian contract law. Your job is to review legal text and provide a professional legal analysis.
 
 CRITICAL INSTRUCTIONS:
@@ -279,6 +316,9 @@ CRITICAL INSTRUCTIONS:
 4. Be accurate about contract type based on the actual content
 5. Use the client context to personalize recommendations
 6. Sound like a junior Indian lawyer assisting a senior
+7. BE CONSISTENT: If analyzing the same contract multiple times, provide identical risk assessments
+
+${consistencyInstruction}
 
 Contract Text: ${contractText.substring(0, 4000)}
 
@@ -291,7 +331,7 @@ Analyze this contract and provide a detailed legal analysis in this EXACT JSON f
 
 {
   "contractType": "string (based on actual contract content)",
-  "riskScore": "low|medium|high (based on actual red flags found)",
+  "riskScore": "low|medium|high (based on actual red flags found${consistentRiskScore ? ` - MUST be "${consistentRiskScore}" for consistency` : ''})",
   "jurisdiction": "string (from contract or default to India)",
   "arbitrationPresent": boolean,
   "executiveSummary": "string (2-3 line summary for client in simple language considering their context)",
@@ -342,14 +382,14 @@ Provide analysis like a junior lawyer would - professional, specific, and action
         messages: [
           {
             role: 'system',
-            content: 'You are a legal expert specializing in Indian contract law. You provide accurate, professional analysis based only on the actual contract content provided. Always number clauses sequentially without gaps (1,2,3,4,5,6...). Never hallucinate clauses or issues that are not present in the text. Return only valid JSON without any additional text or formatting.'
+            content: 'You are a legal expert specializing in Indian contract law. You provide accurate, professional analysis based only on the actual contract content provided. Always number clauses sequentially without gaps (1,2,3,4,5,6...). Never hallucinate clauses or issues that are not present in the text. Return only valid JSON without any additional text or formatting. BE CONSISTENT: Identical documents should receive identical risk assessments.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.2,
+        temperature: 0.1, // Very low temperature for consistency
         max_tokens: 3000
       }),
     });
@@ -378,23 +418,29 @@ Provide analysis like a junior lawyer would - professional, specific, and action
         clause.clauseNumber = index + 1;
       });
     }
+
+    // If we have a consistent risk score requirement, enforce it
+    if (consistentRiskScore) {
+      analysis.riskScore = consistentRiskScore;
+    }
     
     return analysis;
 
   } catch (error) {
     console.error('OpenAI API error:', error);
     
-    // Return improved fallback analysis with sequential numbering and client context
+    // Return improved fallback analysis with consistent risk if provided
+    const fallbackRisk = consistentRiskScore || "high";
     const contextualSuggestions = clientNotes?.includes('small vendor') 
       ? 'Focus on cash flow protection and payment timeline clarity for small vendor operations'
       : 'Standard contract improvements recommended';
 
     return {
       contractType: "Vendor Agreement",
-      riskScore: "high",
+      riskScore: fallbackRisk as 'low' | 'medium' | 'high',
       jurisdiction: "Maharashtra, India",
       arbitrationPresent: true,
-      executiveSummary: `This vendor agreement has several high-risk clauses that need immediate attention. ${contextualSuggestions}.`,
+      executiveSummary: `This vendor agreement has several ${fallbackRisk}-risk clauses that need attention. ${contextualSuggestions}.`,
       clientContext: clientNotes ? `Based on your note about "${clientNotes}", this analysis focuses on protecting your specific business interests.` : 'Standard legal analysis provided.',
       redFlags: [
         {
